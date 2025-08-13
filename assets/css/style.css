@@ -1,0 +1,6 @@
+body {
+  font-family: sans-serif;
+}
+.bg-gradient-to-r {
+  background: linear-gradient(to right, #8e2de2, #c32dcf);
+}
