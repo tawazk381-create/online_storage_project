@@ -16,12 +16,14 @@ $files = $stmt->fetchAll();
 
 // Count for display
 $count = count($files);
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <title><?= ucfirst(sanitize($type)) ?> – Shona Cloud</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
@@ -46,8 +48,6 @@ $count = count($files);
     <div class="d-flex align-items-center mb-3">
         <h2 class="me-3 mb-0"><?= ucfirst(sanitize($type)) ?> (<?= $count ?>)</h2>
         <a href="dashboard.php" class="btn btn-secondary btn-sm">⬅ Back to Folders</a>
-        <!-- NOTE: Folder-level Download All / Delete Folder intentionally removed here.
-             Use the dashboard to perform folder-level actions. -->
     </div>
 
     <div class="row g-4">
@@ -72,7 +72,7 @@ $count = count($files);
                                 <a href="includes/download.php?id=<?= (int)$f['id'] ?>"
                                    class="btn btn-outline-primary btn-sm">Download</a>
 
-                                <!-- Per-file Share (existing functionality) -->
+                                <!-- Per-file Share -->
                                 <button type="button" class="btn btn-outline-secondary btn-sm"
                                         onclick="share(<?= (int)$f['id'] ?>)">Share</button>
 
@@ -89,13 +89,10 @@ $count = count($files);
     </div>
 </div>
 
-<script>
-// Placeholder share function if your existing code expects it.
-// Replace or remove if you already have share() implemented.
-function share(id) {
-    // Example: open a modal or copy share link - adjust to your app's implementation
-    alert('Share feature for file id: ' + id);
-}
-</script>
+<!-- bootstrap js (optional for other UI) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- include the real share() implementation -->
+<script src="assets/js/app.js"></script>
 </body>
 </html>

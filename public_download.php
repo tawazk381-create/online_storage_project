@@ -1,9 +1,12 @@
 <?php
-// public_download.php
+// File: public_download.php
+// Usage: public_download.php?token=... [&preview=1]
+// Place in web root (not in includes/)
+
 require_once __DIR__ . '/includes/config.php';
 
 $token = $_GET['token'] ?? '';
-$preview = isset($_GET['preview']) && $_GET['preview'] == '1';
+$preview = isset($_GET['preview']) && $_GET['preview'] === '1';
 
 if (!$token) {
     http_response_code(400);
@@ -43,7 +46,7 @@ if (!is_file($path) || !is_readable($path)) {
     exit;
 }
 
-// determine MIME
+// Determine mime
 $mime = 'application/octet-stream';
 if (function_exists('finfo_open')) {
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
@@ -57,15 +60,20 @@ if (function_exists('finfo_open')) {
     if ($m) $mime = $m;
 }
 
-// detect image extensions for preview
 $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
 $imageExts = ['jpg','jpeg','png','gif','webp','svg','bmp'];
 $isImage = in_array($ext, $imageExts);
 
-// clear output buffer
+// clear output buffers
 if (ob_get_level()) ob_end_clean();
 
+// Option: Use X-Accel-Redirect (nginx) or X-Sendfile (apache) if available.
+// Configure environment toggles in .env if desired:
+$useXAccel = getenv('USE_X_ACCEL') === '1';
+$nginxInternalPrefix = getenv('NGINX_INTERNAL_PREFIX') ?: '/protected_files'; // map to STORAGE_PATH
+
 if ($preview && $isImage) {
+    // Serve inline for preview (no attachment)
     header('Content-Type: ' . $mime);
     header('Content-Length: ' . filesize($path));
     header('Cache-Control: public, max-age=3600');
@@ -73,7 +81,26 @@ if ($preview && $isImage) {
     exit;
 }
 
-// stream as attachment
+// Try X-Accel-Redirect when enabled
+if ($useXAccel && !empty($nginxInternalPrefix)) {
+    // compute path relative to STORAGE_PATH
+    $rel = str_replace(STORAGE_PATH, '', $path);
+    $rel = ltrim($rel, '/');
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: attachment; filename="' . basename($filename) . '"');
+    header('X-Accel-Redirect: ' . rtrim($nginxInternalPrefix, '/') . '/' . $rel);
+    exit;
+}
+
+// Apache mod_xsendfile
+if (function_exists('apache_get_modules') && in_array('mod_xsendfile', apache_get_modules())) {
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: attachment; filename="' . basename($filename) . '"');
+    header('X-Sendfile: ' . $path);
+    exit;
+}
+
+// Fallback: PHP streaming
 header('Content-Description: File Transfer');
 header('Content-Type: ' . $mime);
 header('Content-Disposition: attachment; filename="' . basename($filename) . '"');
