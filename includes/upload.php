@@ -1,11 +1,11 @@
 <?php
 // File: includes/upload.php
-// Robust upload handler with detailed logging for debugging server 500 errors.
+// Improved upload handler with extra checks and detailed logging for DB insert failures.
 
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/helpers.php';
 
-// Use session to pass error messages back to UI
+// Ensure session available
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
@@ -26,6 +26,7 @@ function friendlyUploadError($code) {
 
 function bytesFromIniSize(string $val): int {
     $val = trim($val);
+    if ($val === '') return 0;
     $last = strtolower($val[strlen($val)-1]);
     $num = (int)$val;
     switch ($last) {
@@ -36,6 +37,14 @@ function bytesFromIniSize(string $val): int {
     }
 }
 
+$logFile = STORAGE_PATH . '/upload_errors.log';
+$dbLogFile = STORAGE_PATH . '/db_errors.log';
+
+// Helper to append log lines (best-effort)
+function appendLog($path, $line) {
+    @file_put_contents($path, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
+}
+
 // Basic guard: must be POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -43,19 +52,26 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// Logged-in requirement (you already use this pattern elsewhere)
+// Logged-in requirement
 if (empty($_SESSION['user_id'])) {
     $_SESSION['error'] = 'You must be logged in to upload.';
     header('Location: ../login.php');
     exit;
 }
 
-$logFile = STORAGE_PATH . '/upload_errors.log';
-
-// Helper to append log lines
-function appendLog($path, $line) {
-    // best-effort append, suppress errors
-    @file_put_contents($path, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
+// check that PDO is available
+if (!isset($pdo) || $pdo === null) {
+    $msg = 'Database connection not available. See ' . $dbLogFile;
+    appendLog($logFile, date('c') . " - ERROR - upload attempted but \$pdo is null - user:{$_SESSION['user_id']}");
+    appendLog($dbLogFile, date('c') . " - ERROR - upload attempted but \$pdo is null - user:{$_SESSION['user_id']}");
+    // In dev, show DB error message if present
+    if (!empty($GLOBALS['DB_ERROR_MESSAGE']) && strtolower(APP_ENV) !== 'production') {
+        $_SESSION['error'] = 'DB error: ' . $GLOBALS['DB_ERROR_MESSAGE'];
+    } else {
+        $_SESSION['error'] = $msg;
+    }
+    header('Location: ../dashboard.php');
+    exit;
 }
 
 // If no file input
@@ -68,7 +84,7 @@ if (!isset($_FILES['file'])) {
 
 $file = $_FILES['file'];
 
-// Check PHP upload error
+// Validate $_FILES structure
 if (!isset($file['error']) || is_array($file['error'])) {
     $msg = 'Invalid upload parameters.';
     $_SESSION['error'] = $msg;
@@ -80,7 +96,6 @@ if (!isset($file['error']) || is_array($file['error'])) {
 if ($file['error'] !== UPLOAD_ERR_OK) {
     $friendly = friendlyUploadError($file['error']);
     $_SESSION['error'] = 'Upload failed: ' . $friendly;
-    // Log full detail for debugging
     $debug = [
         'time' => date('c'),
         'user_id' => $_SESSION['user_id'],
@@ -95,7 +110,7 @@ if ($file['error'] !== UPLOAD_ERR_OK) {
     exit;
 }
 
-// File size checks (compare against PHP limits)
+// Size checks
 $uploadMax = bytesFromIniSize(ini_get('upload_max_filesize'));
 $postMax   = bytesFromIniSize(ini_get('post_max_size'));
 $fileSize  = isset($file['size']) ? (int)$file['size'] : 0;
@@ -147,7 +162,7 @@ $originalName = basename($file['name']);
 $safeFilename = preg_replace('/[^A-Za-z0-9_\-\.]/', '_', $originalName);
 $ext = strtolower(pathinfo($safeFilename, PATHINFO_EXTENSION));
 
-// File type categorization (same as before)
+// categories
 $categories = [
     'images'    => ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'],
     'documents' => ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'rtf','txt', 'csv'],
@@ -202,6 +217,41 @@ if (!$moved) {
     exit;
 }
 
+// Before DB insert: check that files table exists and has expected columns
+try {
+    $cols = [];
+    $descStmt = $pdo->query("DESCRIBE files");
+    $desc = $descStmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($desc as $col) {
+        $cols[] = $col['Field'];
+    }
+    $required = ['user_id', 'filename', 'path', 'file_type', 'size', 'uploaded_at'];
+    $missing = array_diff($required, $cols);
+    if (!empty($missing)) {
+        // rollback file
+        @unlink($target);
+        $msg = 'Missing expected column(s) in files table: ' . implode(', ', $missing);
+        appendLog($dbLogFile, date('c') . " - ERROR - " . $msg . " - user:{$_SESSION['user_id']}");
+        $_SESSION['error'] = 'Server misconfiguration: files table schema mismatch. Contact admin.';
+        if (strtolower(APP_ENV) !== 'production') {
+            $_SESSION['error'] .= ' (' . $msg . ')';
+        }
+        header('Location: ../dashboard.php');
+        exit;
+    }
+} catch (Throwable $e) {
+    // likely the table does not exist or DB error
+    @unlink($target);
+    $errMsg = 'DB error while checking files table: ' . $e->getMessage();
+    appendLog($dbLogFile, date('c') . " - ERROR - " . $errMsg . " - user:{$_SESSION['user_id']} - trace:" . $e->getTraceAsString());
+    $_SESSION['error'] = 'Server misconfiguration: files table missing or inaccessible.';
+    if (strtolower(APP_ENV) !== 'production') {
+        $_SESSION['error'] .= ' ('.$e->getMessage().')';
+    }
+    header('Location: ../dashboard.php');
+    exit;
+}
+
 // All good — insert into DB
 try {
     $stmt = $pdo->prepare("
@@ -213,10 +263,25 @@ try {
 } catch (Throwable $e) {
     // rollback file if DB insert fails
     @unlink($target);
+
+    $errDetails = [
+        'time' => date('c'),
+        'user_id' => $_SESSION['user_id'],
+        'orig_name' => $originalName,
+        'target' => $target,
+        'exception' => $e->getMessage(),
+        'trace' => $e->getTraceAsString()
+    ];
+    appendLog($logFile, json_encode($errDetails));
+    appendLog($dbLogFile, json_encode($errDetails));
+
+    // Friendly message to user
     $_SESSION['error'] = 'Server error saving file metadata.';
-    appendLog($logFile, date('c') . " - ERROR - DB insert failed: " . $e->getMessage() . " - log details:" . json_encode([
-        'user_id' => $_SESSION['user_id'], 'target' => $target
-    ]));
+    if (strtolower(APP_ENV) !== 'production') {
+        // reveal DB error in development to speed debugging
+        $_SESSION['error'] .= ' DB: ' . $e->getMessage();
+    }
+
     header('Location: ../dashboard.php');
     exit;
 }
