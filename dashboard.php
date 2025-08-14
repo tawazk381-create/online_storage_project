@@ -6,12 +6,14 @@ requireAuth();
 $success = $_SESSION['success'] ?? '';
 unset($_SESSION['success']);
 
+$error = $_SESSION['error'] ?? '';
+unset($_SESSION['error']);
+
 // Determine display name: prefer session-stored full name, otherwise fetch from DB
 $displayName = '';
 if (!empty($_SESSION['user_full_name'])) {
     $displayName = sanitize($_SESSION['user_full_name']);
 } elseif (!empty($_SESSION['user_id'])) {
-    // fallback DB query (in case session value not set)
     $stmtName = $pdo->prepare("SELECT full_name FROM users WHERE id = ? LIMIT 1");
     $stmtName->execute([$_SESSION['user_id']]);
     $rowName = $stmtName->fetch();
@@ -25,12 +27,9 @@ $q = trim($_GET['q'] ?? '');
 $searchResults = [];
 $searchCount = 0;
 if ($q !== '') {
-    // Limit results to avoid huge payloads; adjust as needed
     $limit = 500;
     $like = '%' . $q . '%';
 
-    // NOTE: LIMIT cannot reliably be bound as a parameter in many MySQL/MariaDB drivers,
-    // so we inject an integer-casted value into the SQL string (safe because of intval()).
     $sql = "
         SELECT id, filename, file_type, uploaded_at
         FROM files
@@ -44,7 +43,7 @@ if ($q !== '') {
     $searchCount = count($searchResults);
 }
 
-// If no search, get folder types and counts for the logged-in user
+// If no search, get folder types and counts
 $fileTypes = [];
 if ($q === '') {
     $stmt = $pdo->prepare("SELECT file_type, COUNT(*) AS cnt FROM files WHERE user_id = ? GROUP BY file_type ORDER BY file_type");
@@ -52,7 +51,6 @@ if ($q === '') {
     $fileTypes = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// Optional message from actions (delete, etc.)
 $msg = $_GET['msg'] ?? '';
 ?>
 <!DOCTYPE html>
@@ -87,25 +85,18 @@ $msg = $_GET['msg'] ?? '';
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
     <div class="container-fluid">
         <a class="navbar-brand" href="dashboard.php">Shona Cloud</a>
-
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain" aria-controls="navMain" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
         </button>
-
         <div class="collapse navbar-collapse" id="navMain">
-            <ul class="navbar-nav me-auto">
-                <!-- left side if needed -->
-            </ul>
-
-            <!-- Search form in navbar -->
-            <form class="d-flex me-3" method="get" action="dashboard.php" role="search" onsubmit="return true;">
+            <ul class="navbar-nav me-auto"></ul>
+            <form class="d-flex me-3" method="get" action="dashboard.php" role="search">
                 <input class="form-control form-control-sm me-2" type="search" name="q" placeholder="Search files..." aria-label="Search files" value="<?= sanitize($q) ?>">
                 <?php if ($q !== ''): ?>
                     <a href="dashboard.php" class="btn btn-sm btn-outline-light me-2">Clear</a>
                 <?php endif; ?>
                 <button class="btn btn-sm btn-light" type="submit">Search</button>
             </form>
-
             <ul class="navbar-nav ms-auto">
                 <li class="nav-item"><a class="nav-link" href="logout.php">Logout</a></li>
             </ul>
@@ -118,6 +109,10 @@ $msg = $_GET['msg'] ?? '';
         <div class="alert alert-success"><?= sanitize($success) ?></div>
     <?php endif; ?>
 
+    <?php if ($error): ?>
+        <div class="alert alert-danger"><?= sanitize($error) ?></div>
+    <?php endif; ?>
+
     <?php if ($msg): ?>
         <div class="alert alert-info"><?= sanitize($msg) ?></div>
     <?php endif; ?>
@@ -127,10 +122,9 @@ $msg = $_GET['msg'] ?? '';
             <h2 class="text-secondary mb-1">Welcome, <?= $displayName ?>!</h2>
             <p class="text-muted mb-0">Your file library is organised into folders by type.</p>
         </div>
-
         <div class="ms-auto d-flex gap-2">
-            <a href="profile.php" class="btn btn-outline-secondary btn-sm align-self-start">Edit Profile</a>
-            <a href="delete_account.php" class="btn btn-outline-danger btn-sm align-self-start"
+            <a href="profile.php" class="btn btn-outline-secondary btn-sm">Edit Profile</a>
+            <a href="delete_account.php" class="btn btn-outline-danger btn-sm"
                onclick="return confirm('Are you sure you want to delete your account? All your files will be lost.');">Unsubscribe</a>
         </div>
     </div>
@@ -148,9 +142,8 @@ $msg = $_GET['msg'] ?? '';
     <?php if ($q !== ''): ?>
         <div class="mb-3">
             <h4>Search results for "<?= sanitize($q) ?>" <small class="text-muted">(<?= $searchCount ?> found)</small></h4>
-            <p class="text-muted mb-0">Showing up to <?= intval($limit) ?> most recent matches. Try a more specific phrase if you get too many results.</p>
+            <p class="text-muted mb-0">Showing up to <?= intval($limit) ?> most recent matches.</p>
         </div>
-
         <?php if (empty($searchResults)): ?>
             <div class="alert alert-info">No files matched your search.</div>
         <?php else: ?>
@@ -175,9 +168,7 @@ $msg = $_GET['msg'] ?? '';
                 <?php endforeach; ?>
             </div>
         <?php endif; ?>
-
     <?php else: ?>
-        <!-- Folder overview when no search -->
         <div class="row g-4">
             <?php if (empty($fileTypes)): ?>
                 <div class="col-12">
@@ -196,12 +187,10 @@ $msg = $_GET['msg'] ?? '';
                                 <h5 class="mt-2 mb-0 text-truncate"><?= ucfirst(sanitize($type)) ?></h5>
                                 <div class="folder-meta"><?= $count ?> file<?= $count !== 1 ? 's' : '' ?></div>
                             </div>
-
                             <div class="mt-3">
                                 <div class="d-grid gap-2">
                                     <a href="view_folder.php?type=<?= $typeEsc ?>" class="btn btn-primary btn-sm">Open</a>
                                     <a href="includes/download_folder.php?type=<?= $typeEsc ?>" class="btn btn-outline-primary btn-sm" <?= $count === 0 ? 'aria-disabled="true" tabindex="-1"' : '' ?>>Download</a>
-
                                     <form action="includes/delete_folder.php" method="post" onsubmit="return confirmDeleteFolder('<?= sanitize($type) ?>');" class="m-0">
                                         <input type="hidden" name="type" value="<?= sanitize($type) ?>">
                                         <button type="submit" class="btn btn-outline-danger btn-sm" <?= $count === 0 ? 'disabled' : '' ?>>Delete Folder</button>
@@ -214,7 +203,6 @@ $msg = $_GET['msg'] ?? '';
             <?php endif; ?>
         </div>
     <?php endif; ?>
-
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

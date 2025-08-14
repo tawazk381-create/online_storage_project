@@ -25,10 +25,12 @@ if (file_exists($dotenvPath)) {
 //////////////////////
 define('APP_ENV', getenv('APP_ENV') ?: 'production'); // change to 'development' if needed
 define('APP_URL', getenv('APP_URL') ?: ''); // e.g. https://files.example.com
-define('STORAGE_PATH', rtrim(getenv('STORAGE_PATH') ?: __DIR__ . '/../storage', '/')); // absolute path for uploaded files
+
+// FIXED: use consistent absolute storage path
+define('STORAGE_PATH', __DIR__ . '/../storage');
 
 //////////////////////
-// Database credentials (defaults are what you provided)
+// Database credentials
 //////////////////////
 define('DB_HOST', getenv('DB_HOST') ?: 'sql113.infinityfree.com');
 define('DB_NAME', getenv('DB_NAME') ?: 'if0_39687575_onlinestorage');
@@ -36,7 +38,7 @@ define('DB_USER', getenv('DB_USER') ?: 'if0_39687575');
 define('DB_PASS', getenv('DB_PASS') ?: 'at14july1989');
 
 //////////////////////
-// Session cookie security (must call before session_start)
+// Session cookie security
 //////////////////////
 $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
           || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
@@ -53,7 +55,6 @@ $cookieParams = [
 if (PHP_VERSION_ID >= 70300) {
     session_set_cookie_params($cookieParams);
 } else {
-    // fallback for older PHP
     session_set_cookie_params(
         $cookieParams['lifetime'],
         $cookieParams['path'] . '; samesite=' . $cookieParams['samesite'],
@@ -81,5 +82,4 @@ if (strtolower(APP_ENV) === 'production') {
 //////////////////////
 // Include DB & helpers
 //////////////////////
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/db.ph_
