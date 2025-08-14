@@ -1,98 +1,146 @@
 <?php
-// File: view_folder.php
+// view_folder.php
 require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/helpers.php';
 requireAuth();
 
 $type = $_GET['type'] ?? '';
-if (!$type) {
+if ($type === '') {
     header('Location: dashboard.php');
     exit;
 }
 
-// Get files of this type for the logged-in user
-$stmt = $pdo->prepare("SELECT * FROM files WHERE user_id = ? AND file_type = ? ORDER BY uploaded_at DESC");
+// fetch files for this user and type
+$stmt = $pdo->prepare("SELECT id, filename, size, uploaded_at FROM files WHERE user_id = ? AND file_type = ? ORDER BY uploaded_at DESC");
 $stmt->execute([$_SESSION['user_id'], $type]);
-$files = $stmt->fetchAll();
+$files = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Count for display
-$count = count($files);
-
+$success = $_SESSION['success'] ?? '';
+$error = $_SESSION['error'] ?? '';
+unset($_SESSION['success'], $_SESSION['error']);
 ?>
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title><?= ucfirst(sanitize($type)) ?> – Shona Cloud</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="assets/css/style.css">
-    <style>
-        .card-body .btn { min-width: 100%; }
-        .file-card { min-height: 160px; display:flex; flex-direction:column; justify-content:space-between; }
-    </style>
+<meta charset="utf-8">
+<title>Folder: <?= htmlspecialchars($type, ENT_QUOTES, 'UTF-8') ?></title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="dashboard.php">Shona Cloud</a>
-        <div class="collapse navbar-collapse">
-            <ul class="navbar-nav ms-auto">
-                <li class="nav-item"><a class="nav-link" href="profile.php">Profile</a></li>
-                <li class="nav-item"><a class="nav-link" href="logout.php">Logout</a></li>
-            </ul>
-        </div>
+  <div class="container-fluid">
+    <a class="navbar-brand" href="dashboard.php">Shona Cloud</a>
+    <div class="collapse navbar-collapse">
+      <ul class="navbar-nav ms-auto">
+        <li class="nav-item"><a class="nav-link" href="logout.php">Logout</a></li>
+      </ul>
     </div>
+  </div>
 </nav>
 
 <div class="container my-4">
-    <div class="d-flex align-items-center mb-3">
-        <h2 class="me-3 mb-0"><?= ucfirst(sanitize($type)) ?> (<?= $count ?>)</h2>
-        <a href="dashboard.php" class="btn btn-secondary btn-sm">⬅ Back to Folders</a>
+  <?php if ($success): ?><div class="alert alert-success"><?= sanitize($success) ?></div><?php endif; ?>
+  <?php if ($error): ?><div class="alert alert-danger"><?= sanitize($error) ?></div><?php endif; ?>
+
+  <h4>Folder: <?= sanitize($type) ?></h4>
+
+  <form id="batchForm" method="post">
+    <div class="mb-3">
+      <button type="button" id="downloadBtn" class="btn btn-primary btn-sm">Download Selected</button>
+      <button type="button" id="shareBtn" class="btn btn-outline-secondary btn-sm">Share Selected</button>
+      <button type="button" id="deleteBtn" class="btn btn-danger btn-sm">Delete Selected</button>
+      <a href="dashboard.php" class="btn btn-secondary btn-sm">Back</a>
     </div>
 
-    <div class="row g-4">
+    <table class="table table-sm table-hover">
+      <thead>
+        <tr>
+          <th style="width:38px"><input type="checkbox" id="selectAll"></th>
+          <th>Filename</th>
+          <th style="width:140px">Size</th>
+          <th style="width:160px">Uploaded</th>
+        </tr>
+      </thead>
+      <tbody>
         <?php if (empty($files)): ?>
-            <div class="col-12">
-                <div class="alert alert-info text-center">No files in this folder yet.</div>
-            </div>
+          <tr><td colspan="4" class="text-center">No files in this folder.</td></tr>
         <?php else: ?>
-            <?php foreach ($files as $f): ?>
-                <div class="col-sm-6 col-md-4 col-lg-3">
-                    <div class="card h-100 shadow-sm file-card">
-                        <div class="card-body d-flex flex-column">
-                            <h6 class="card-subtitle mb-2 text-truncate"><?= sanitize($f['filename']) ?></h6>
-                            <p class="card-text text-muted small mb-3">
-                                Uploaded: <?= date('M j, Y', strtotime($f['uploaded_at'])) ?>
-                                <br>
-                                Size: <?= isset($f['size']) ? number_format((int)$f['size'] / 1024, 2) . ' KB' : '—' ?>
-                            </p>
-
-                            <div class="mt-auto d-grid gap-2">
-                                <!-- Per-file Download -->
-                                <a href="includes/download.php?id=<?= (int)$f['id'] ?>"
-                                   class="btn btn-outline-primary btn-sm">Download</a>
-
-                                <!-- Per-file Share -->
-                                <button type="button" class="btn btn-outline-secondary btn-sm"
-                                        onclick="share(<?= (int)$f['id'] ?>)">Share</button>
-
-                                <!-- Per-file Delete -->
-                                <a href="includes/delete.php?id=<?= (int)$f['id'] ?>"
-                                   class="btn btn-outline-danger btn-sm"
-                                   onclick="return confirm('Delete <?= sanitize($f['filename']) ?>?');">Delete</a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            <?php endforeach; ?>
+          <?php foreach ($files as $f): ?>
+            <tr>
+              <td><input type="checkbox" name="ids[]" value="<?= (int)$f['id'] ?>" class="file-checkbox"></td>
+              <td><?= sanitize($f['filename']) ?></td>
+              <td><?= isset($f['size']) ? number_format((int)$f['size']/1024, 2) . ' KB' : '—' ?></td>
+              <td><?= sanitize(date('M j, Y H:i', strtotime($f['uploaded_at']))) ?></td>
+            </tr>
+          <?php endforeach; ?>
         <?php endif; ?>
-    </div>
+      </tbody>
+    </table>
+  </form>
 </div>
 
-<!-- bootstrap js (optional for other UI) -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+function serializeSelected() {
+  const checked = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(i => i.value);
+  return checked;
+}
 
-<!-- include the real share() implementation -->
-<script src="assets/js/app.js"></script>
+document.getElementById('selectAll').addEventListener('change', function(){
+  const v = this.checked;
+  document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = v);
+});
+
+document.getElementById('downloadBtn').addEventListener('click', function(){
+  const ids = serializeSelected();
+  if (!ids.length) { alert('Select files first'); return; }
+  // create a form and submit to includes/download_multiple.php
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = 'includes/download_multiple.php';
+  ids.forEach(id => {
+    const i = document.createElement('input'); i.type='hidden'; i.name='ids[]'; i.value = id; form.appendChild(i);
+  });
+  document.body.appendChild(form);
+  form.submit();
+});
+
+document.getElementById('deleteBtn').addEventListener('click', function(){
+  const ids = serializeSelected();
+  if (!ids.length) { alert('Select files first'); return; }
+  if (!confirm('Delete selected files? This cannot be undone.')) return;
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = 'includes/delete_multiple.php';
+  ids.forEach(id => {
+    const i = document.createElement('input'); i.type='hidden'; i.name='ids[]'; i.value = id; form.appendChild(i);
+  });
+  document.body.appendChild(form);
+  form.submit();
+});
+
+document.getElementById('shareBtn').addEventListener('click', function(){
+  const ids = serializeSelected();
+  if (!ids.length) { alert('Select files first'); return; }
+  if (!confirm('Create a share link for the selected files?')) return;
+  const data = new FormData();
+  ids.forEach(id => data.append('ids[]', id));
+  fetch('includes/share_multiple.php', { method: 'POST', body: data, credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(json => {
+      if (json.error) { alert('Error: ' + json.error); return; }
+      const url = json.url;
+      // try write to clipboard then show
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => alert('Share link copied to clipboard: ' + url)).catch(()=>prompt('Share link (copy):', url));
+      } else {
+        prompt('Share link (copy):', url);
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      alert('Server error creating share link.');
+    });
+});
+</script>
 </body>
 </html>
