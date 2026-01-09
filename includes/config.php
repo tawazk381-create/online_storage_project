@@ -34,10 +34,10 @@ define('STORAGE_PATH', __DIR__ . '/../storage');
 // Database credentials
 // Prefer putting these in .env in production
 //////////////////////
-define('DB_HOST', getenv('DB_HOST') ?: 'sql113.infinityfree.com');
-define('DB_NAME', getenv('DB_NAME') ?: 'if0_39687575_onlinestorage');
-define('DB_USER', getenv('DB_USER') ?: 'if0_39687575');
-define('DB_PASS', getenv('DB_PASS') ?: 'at14july1989');
+define('DB_HOST', getenv('DB_HOST') ?: 'sql107.infinityfree.com');
+define('DB_NAME', getenv('DB_NAME') ?: 'if0_40809906_onlinestorage');
+define('DB_USER', getenv('DB_USER') ?: 'if0_40809906');
+define('DB_PASS', getenv('DB_PASS') ?: 'CtV2hiDrDOI');
 
 //////////////////////
 // Session cookie security (must call before session_start)
